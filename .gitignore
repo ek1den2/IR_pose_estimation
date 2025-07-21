@@ -1,0 +1,23 @@
+# ディレクトリ
+checkpoints/
+data/
+logs/
+experiments/
+results/
+
+# ファイル
+results.json
+.DS_Store
+
+# Python関連
+__pycache__/
+*.pyc
+
+# C++ラッパー
+lib/pafprocess/build/
+lib/pafprocess/pafprocess.py
+lib/pafprocess/pafprocess_wrap.cpp
+lib/pafprocess/pafprocess_wrap.cxx
+
+# 共有ライブラリ
+*.so
