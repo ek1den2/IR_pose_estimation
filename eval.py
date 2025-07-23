@@ -26,40 +26,49 @@ from lib.network.networks import get_model
 
 ORDER_CUSTOM = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 DATA_DIR = './data/'
-CKPT_DIR = './checkpoints/'
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', '--model', type=str, default='vgg2016', help='使用するモデル名')
     parser.add_argument('-c', '--ckpt', type=str, help='pthファイルのパス')
-    parser.add_argument('-d', '--data_dir', type=str, help='データセットディレクトリ名')
+    parser.add_argument('-d', '--datasets', type=str, help='データセットディレクトリ名')
+    parser.add_argument('--mode', type=str, default='val', help='評価に使うディレクトリ名')
+    parser.add_argument('--save', type=int, default=1, help='可視化結果を保存間隔(0で保存しない)')
+    parser.add_argument('--json', action='store_true', help='jsonデータを保存するかどうか')
     parser.add_argument('--preprocess', type=str, default='vgg', choices=['vgg', 'rtpose'], help='前処理の種類')
     args = parser.parse_args()
 
     device = get_using_device()
 
     # データのパス設定
-    args.test_image_dir = os.path.join(DATA_DIR, args.data_dir, 'images/val') 
-    args.test_annotation_file = os.path.join(DATA_DIR, args.data_dir, 'annotations_val.json')
-    ckpt_path = os.path.join(CKPT_DIR, args.model, args.ckpt)
-
+    args.test_image_dir = os.path.join(DATA_DIR, args.datasets, 'images', args.mode) 
+    args.test_annotation_file = os.path.join(DATA_DIR, args.datasets, f'annotations_{args.mode}.json')
 
     # モデルの選択
     model = get_model(model_name=args.model)
 
     # チェックポイントのロード
-    model = load_ckpt(model, ckpt_path, device)
+    model = load_ckpt(model, args.ckpt, device)
+
+    save_flag = args.save
 
     # 評価
-    run_eval(image_dir=args.test_image_dir, anno_file=args.test_annotation_file, vis_dir='results/', model=model, preprocess='vgg', device=device)
+    run_eval(
+        image_dir=args.test_image_dir,
+        anno_file=args.test_annotation_file,
+        vis_dir='results/',
+        model=model,
+        preprocess='vgg',
+        device=device,
+        args=args)
 
 
-def eval_coco(outputs, annFile, imgIds):
+def eval_coco(outputs, annFile, imgIds, args):
     """coco形式で画像を評価"""
-    with open('results.json', 'w') as f:
-        json.dump(outputs, f)  
+    with open('./results/results.json', 'w') as f:
+        json.dump(outputs, f)
     cocoGt = COCO(annFile)  # load annotations
-    cocoDt = cocoGt.loadRes('results.json')  # load model outputs
+    cocoDt = cocoGt.loadRes('./results/results.json')  # load model outputs
 
     # running evaluation
     cocoEval = COCOeval(cocoGt, cocoDt, 'keypoints')
@@ -67,7 +76,8 @@ def eval_coco(outputs, annFile, imgIds):
     cocoEval.evaluate()
     cocoEval.accumulate()
     cocoEval.summarize()
-    # os.remove('results.json')
+    if args.json is False:
+        os.remove('./results/results.json')
 
     # return Average Precision
     return cocoEval.stats[0]
@@ -109,7 +119,7 @@ def append_result(image_id, humans, upsample_keypoints, outputs):
 
 
         
-def run_eval(image_dir, anno_file, vis_dir, model, preprocess, device):
+def run_eval(image_dir, anno_file, vis_dir, model, preprocess, device, args):
     """評価"""
     
     coco = COCO(anno_file)
@@ -128,8 +138,6 @@ def run_eval(image_dir, anno_file, vis_dir, model, preprocess, device):
         file_path = os.path.join(image_dir, file_name)
 
         oriImg = cv2.imread(file_path)
-        # 画像の最も短い辺を取得
-        shape_dst = np.min(oriImg.shape[0:2])
 
         # モデルの出力を取得
         paf, heatmap, scale_img = get_outputs(oriImg, model,  preprocess, device)
@@ -138,16 +146,18 @@ def run_eval(image_dir, anno_file, vis_dir, model, preprocess, device):
         humans = paf_to_pose_cpp(heatmap, paf, cfg)
         
         # 骨格を描画
-        out = draw_humans(oriImg, humans)
-            
-        vis_path = os.path.join(vis_dir, file_name)
-        cv2.imwrite(vis_path, out)
+        if args.save != 0:
+            if i % args.save == 0:
+                out = draw_humans(oriImg, humans)
+                vis_path = os.path.join(vis_dir, file_name)
+                cv2.imwrite(vis_path, out)
+
         # subsetはこの画像に写っている人物の人数を示す
         upsample_keypoints = (heatmap.shape[0]*cfg.MODEL.DOWNSAMPLE/scale_img, heatmap.shape[1]*cfg.MODEL.DOWNSAMPLE/scale_img)
         append_result(img_ids[i], humans, upsample_keypoints, outputs)
 
     # 評価を出力
-    return eval_coco(outputs=outputs, annFile=anno_file, imgIds=img_ids)
+    return eval_coco(outputs=outputs, annFile=anno_file, imgIds=img_ids, args=args)
 
 
 if __name__ == "__main__":
